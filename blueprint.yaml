@@ -1,42 +1,49 @@
 blueprint:
-  name: Gekoppelter Schalter mit manuellem Override
-  description: Schalter A wird aktiviert, wenn Schalter B aktiviert wird. Wenn A vorher manuell aktiviert wurde, bleibt A aktiv, auch wenn B deaktiviert wird.
+  name: Conditional Linked Switches with Individual Manual Overrides
+  description: Each controlled switch is turned on when the trigger switch is turned on. If a controlled switch was manually turned on before the trigger, it stays on when the trigger is turned off.
   domain: automation
   input:
-    schalter_a:
-      name: Schalter A
+    controlled_switches:
+      name: Controlled Switches
+      selector:
+        entity:
+          multiple: true
+          domain: input_boolean
+    trigger_switch:
+      name: Trigger Switch
       selector:
         entity:
           domain: input_boolean
-    schalter_b:
-      name: Schalter B
+    override_flags:
+      name: Manual Activation Flags (one per controlled switch)
       selector:
         entity:
-          domain: input_boolean
-    override_flag:
-      name: Merker "A manuell aktiviert"
-      selector:
-        entity:
+          multiple: true
           domain: input_boolean
 
-mode: single
+mode: queued
+
+variables:
+  controlled_list: !input controlled_switches
+  override_list: !input override_flags
 
 trigger:
   - platform: state
-    entity_id: !input schalter_a
+    entity_id: !input trigger_switch
     from: 'off'
     to: 'on'
-    id: a_manuell
+    id: trigger_on
   - platform: state
-    entity_id: !input schalter_b
-    from: 'off'
-    to: 'on'
-    id: b_an
-  - platform: state
-    entity_id: !input schalter_b
+    entity_id: !input trigger_switch
     from: 'on'
     to: 'off'
-    id: b_aus
+    id: trigger_off
+  - platform: state
+    entity_id: !input controlled_switches
+    to: 'on'
+    for:
+      seconds: 1
+    id: controlled_manual
 
 condition: []
 
@@ -44,35 +51,50 @@ action:
   - choose:
       - conditions:
           - condition: trigger
-            id: a_manuell
+            id: controlled_manual
           - condition: state
-            entity_id: !input schalter_b
+            entity_id: !input trigger_switch
             state: 'off'
         sequence:
-          - service: input_boolean.turn_on
-            target:
-              entity_id: !input override_flag
+          - repeat:
+              for_each: "{{ range(0, controlled_list | length) | list }}"
+              sequence:
+                - condition: template
+                  value_template: >
+                    {{ state_attr(trigger.to_state.entity_id, 'entity_id') == controlled_list[repeat.item] }}
+                - service: input_boolean.turn_on
+                  target:
+                    entity_id: "{{ override_list[repeat.item] }}"
 
       - conditions:
           - condition: trigger
-            id: b_an
+            id: trigger_on
         sequence:
-          - service: input_boolean.turn_on
-            target:
-              entity_id: !input schalter_a
-          - service: input_boolean.turn_off
-            target:
-              entity_id: !input override_flag
+          - repeat:
+              for_each: controlled_list
+              sequence:
+                - service: input_boolean.turn_on
+                  target:
+                    entity_id: "{{ repeat.item }}"
+          - repeat:
+              for_each: override_list
+              sequence:
+                - service: input_boolean.turn_off
+                  target:
+                    entity_id: "{{ repeat.item }}"
 
       - conditions:
           - condition: trigger
-            id: b_aus
-          - condition: state
-            entity_id: !input override_flag
-            state: 'off'
+            id: trigger_off
         sequence:
-          - service: input_boolean.turn_off
-            target:
-              entity_id: !input schalter_a
+          - repeat:
+              for_each: "{{ range(0, controlled_list | length) | list }}"
+              sequence:
+                - condition: state
+                  entity_id: "{{ override_list[repeat.item] }}"
+                  state: 'off'
+                - service: input_boolean.turn_off
+                  target:
+                    entity_id: "{{ controlled_list[repeat.item] }}"
 
     default: []
