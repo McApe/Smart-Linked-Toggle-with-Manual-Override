@@ -1,0 +1,78 @@
+blueprint:
+  name: Gekoppelter Schalter mit manuellem Override
+  description: Schalter A wird aktiviert, wenn Schalter B aktiviert wird. Wenn A vorher manuell aktiviert wurde, bleibt A aktiv, auch wenn B deaktiviert wird.
+  domain: automation
+  input:
+    schalter_a:
+      name: Schalter A
+      selector:
+        entity:
+          domain: input_boolean
+    schalter_b:
+      name: Schalter B
+      selector:
+        entity:
+          domain: input_boolean
+    override_flag:
+      name: Merker "A manuell aktiviert"
+      selector:
+        entity:
+          domain: input_boolean
+
+mode: single
+
+trigger:
+  - platform: state
+    entity_id: !input schalter_a
+    from: 'off'
+    to: 'on'
+    id: a_manuell
+  - platform: state
+    entity_id: !input schalter_b
+    from: 'off'
+    to: 'on'
+    id: b_an
+  - platform: state
+    entity_id: !input schalter_b
+    from: 'on'
+    to: 'off'
+    id: b_aus
+
+condition: []
+
+action:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: a_manuell
+          - condition: state
+            entity_id: !input schalter_b
+            state: 'off'
+        sequence:
+          - service: input_boolean.turn_on
+            target:
+              entity_id: !input override_flag
+
+      - conditions:
+          - condition: trigger
+            id: b_an
+        sequence:
+          - service: input_boolean.turn_on
+            target:
+              entity_id: !input schalter_a
+          - service: input_boolean.turn_off
+            target:
+              entity_id: !input override_flag
+
+      - conditions:
+          - condition: trigger
+            id: b_aus
+          - condition: state
+            entity_id: !input override_flag
+            state: 'off'
+        sequence:
+          - service: input_boolean.turn_off
+            target:
+              entity_id: !input schalter_a
+
+    default: []
